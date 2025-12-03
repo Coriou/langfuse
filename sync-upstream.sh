@@ -3,10 +3,22 @@
 # Sync upstream changes to the custom branch
 # This script helps keep your fork in sync with the upstream repository
 # while preserving your Docker Compose modifications for Coolify
+#
+# By default, syncs to the latest stable release tag (v*.*.*)
+# Use --main to sync with upstream/main instead
 
 set -e
 
 echo "🔄 Syncing with upstream..."
+
+# Parse arguments
+SYNC_TARGET="tag"  # default to latest tag
+if [ "$1" == "--main" ]; then
+    SYNC_TARGET="main"
+    echo "📌 Will sync to upstream/main"
+else
+    echo "📌 Will sync to latest stable tag (use --main to sync with main branch)"
+fi
 
 # Ensure we're on the custom branch
 CURRENT_BRANCH=$(git branch --show-current)
@@ -40,30 +52,45 @@ fi
 # Fetch latest changes from upstream
 echo "📥 Fetching from upstream..."
 git fetch upstream
+git fetch upstream --tags
+
+# Determine target
+if [ "$SYNC_TARGET" == "main" ]; then
+    TARGET="upstream/main"
+else
+    # Get latest stable tag (v*.*.* format, sorted by version)
+    LATEST_TAG=$(git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+    if [ -z "$LATEST_TAG" ]; then
+        echo "❌ No stable tags found. Use --main to sync with main branch."
+        exit 1
+    fi
+    TARGET="$LATEST_TAG"
+    echo "🏷️  Latest stable tag: $TARGET"
+fi
 
 # Show what will change
 echo ""
-echo "📊 Changes between your branch and upstream/main:"
-git log --oneline --graph HEAD..upstream/main | head -20
+echo "📊 Changes between your branch and $TARGET:"
+git log --oneline --graph HEAD..$TARGET | head -20
 echo ""
 
-read -p "Do you want to rebase on upstream/main? (y/n) " -n 1 -r
+read -p "Do you want to rebase on $TARGET? (y/n) " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "❌ Sync cancelled."
     exit 0
 fi
 
-# Rebase onto upstream/main
-echo "🔨 Rebasing custom branch on upstream/main..."
-if git rebase upstream/main; then
+# Rebase onto target
+echo "🔨 Rebasing custom branch on $TARGET..."
+if git rebase $TARGET; then
     echo "✅ Rebase successful!"
     echo ""
     echo "📝 Your Docker Compose changes for Coolify have been preserved."
     echo ""
     echo "🔍 Verifying changes..."
-    echo "Current diff from upstream/main:"
-    git diff upstream/main --stat docker-compose*.yml
+    echo "Current diff from $TARGET:"
+    git diff $TARGET --stat docker-compose*.yml
     echo ""
     echo "✨ To push these changes to your fork, run:"
     echo "   git push origin custom --force-with-lease"
