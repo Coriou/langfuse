@@ -1,109 +1,80 @@
 # Coolify Deployment Guide
 
-This guide explains how to deploy Langfuse to Coolify using the custom branch with Coolify-specific overrides.
+This guide explains how to deploy Langfuse to Coolify using the custom branch.
 
 ## Overview
 
-The `custom` branch maintains:
-1. **Identical `docker-compose.yml`** to upstream (no modifications)
-2. **`docker-compose.coolify.yml`** with Coolify-specific overrides
-3. Your port binding preferences for Coolify's networking
+The `custom` branch is optimized for Coolify with these modifications:
+
+1. **MinIO**: Uses `docker.io/minio/minio:latest` with curl-based healthcheck (fixes Chainguard image issues)
+2. **Ports**: All localhost-bound ports commented out (services connect internally via Docker network)
+3. **PostgreSQL**: Simplified environment variables
+4. **Redis**: Removed `maxmemory-policy` directive
+
+Based on stable upstream tag **v3.136.0** for reliability.
 
 ## Quick Start
 
-### Option 1: Configure Coolify to Use Override File (Recommended)
-
 In your Coolify application settings:
 
-1. **Docker Compose Location**: Set to use both files
-   ```
-   -f docker-compose.yml -f docker-compose.coolify.yml
-   ```
-
+1. **Docker Compose Location**: `docker-compose.yml` (default)
 2. **Branch**: `custom`
+3. **Deploy**: Click deploy
 
-3. **Deploy**: Coolify will automatically use both files
+That's it! All changes are in the single `docker-compose.yml` file.
 
-### Option 2: Manual Docker Compose Command
+## Modifications from Upstream
 
-If deploying manually or testing locally:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.coolify.yml up -d
-```
-
-## What's Different in docker-compose.coolify.yml?
-
-The override file changes only what's necessary for Coolify:
+The `custom` branch contains these Coolify-specific changes:
 
 ### MinIO Service
-- **Image**: Uses `docker.io/minio/minio:latest` instead of `cgr.dev/chainguard/minio`
-- **Reason**: Chainguard image's healthcheck fails in Coolify's environment
-- **Healthcheck**: Uses `curl` instead of `mc ready local`
-- **Impact**: More reliable startup and healthchecks
+```yaml
+image: docker.io/minio/minio:latest  # Instead of cgr.dev/chainguard/minio
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+ports:
+  - 9090:9000
+  - 9091:9001  # Not localhost-bound for Coolify access
+```
 
-### Port Bindings
-All your port customizations are in the base `docker-compose.yml`:
-- ClickHouse ports commented out
-- Redis ports commented out  
-- PostgreSQL ports commented out
-- MinIO console exposed on 9091 (not localhost-bound)
-
-## How This Works
-
-Docker Compose merges files from left to right:
-1. Loads `docker-compose.yml` (base configuration)
-2. Applies `docker-compose.coolify.yml` (overrides)
-3. Final configuration uses Coolify-compatible settings
-
-Services not mentioned in the override file use the base configuration unchanged.
+### Internal Services (ClickHouse, Redis, PostgreSQL)
+All internal service ports are commented out - they communicate via Docker network names:
+```yaml
+# ports:
+  # - 127.0.0.1:6379:6379
+```
 
 ## Keeping in Sync with Upstream
 
-The `docker-compose.yml` stays **identical to upstream**, making syncing easy:
+Sync to the latest stable release:
 
 ```bash
-# Sync to latest stable tag (recommended)
 ./sync-upstream.sh
-
-# Or sync to main branch
-./sync-upstream.sh --main
 ```
 
-After syncing:
-- `docker-compose.yml` updates with latest upstream changes
-- `docker-compose.coolify.yml` stays the same (your overrides)
-- No merge conflicts on the compose file!
+This will:
+1. Fetch the latest stable tag from upstream
+2. Rebase your custom branch on top of it
+3. Preserve your Coolify-specific modifications
+
+**Note**: After syncing, you'll need to manually reapply the Coolify changes (MinIO image, port comments, etc.) if upstream modified those sections.
 
 ## Troubleshooting
 
-### MinIO Still Unhealthy
+### Port Already Allocated Error
 
-If MinIO continues to fail healthchecks:
+If you see "port is already allocated" errors, ensure all localhost-bound ports are commented out in `docker-compose.yml`:
+- ClickHouse: 8123, 9000
+- Redis: 6379
+- PostgreSQL: 5432
 
-1. Check MinIO logs:
-   ```bash
-   docker logs minio-<container-id>
-   ```
+### MinIO Unhealthy
 
-2. Increase healthcheck timing in `docker-compose.coolify.yml`:
-   ```yaml
-   minio:
-     healthcheck:
-       start_period: 30s
-       interval: 10s
-   ```
-
-### Need More Overrides?
-
-Add any Coolify-specific changes to `docker-compose.coolify.yml`:
-
+If MinIO fails healthchecks, check the logs in Coolify or increase the `start_period`:
 ```yaml
-services:
-  langfuse-web:
-    environment:
-      # Add Coolify-specific env vars
-      CUSTOM_VAR: value
+minio:
+  healthcheck:
+    start_period: 30s  # Give MinIO more time to start
 ```
 
 ## Environment Variables
@@ -134,10 +105,22 @@ POSTGRES_PASSWORD=<postgres-password>
 
 ## Branch Strategy
 
-- **`main`**: Tracks upstream/main (not used for deployment)
-- **`custom`**: Based on stable tags (e.g., v3.136.0) + your modifications
-  - Deploy this branch to Coolify
-  - Regularly sync with upstream stable releases
+- **`main`**: Tracks upstream/main (for reference only)
+- **`custom`**: Based on stable tags (e.g., v3.136.0) with Coolify modifications
+  - **Deploy this branch to Coolify**
+  - Sync regularly with `./sync-upstream.sh` to get new releases
+
+## Summary of Changes
+
+Your `custom` branch differs from upstream in these ways:
+1. MinIO uses standard `docker.io/minio/minio:latest` image
+2. MinIO healthcheck uses `curl` instead of `mc`
+3. MinIO console port not localhost-bound (9091 instead of 127.0.0.1:9091)
+4. ClickHouse, Redis, PostgreSQL ports commented out
+5. Redis `maxmemory-policy` removed
+6. PostgreSQL `TZ` and `PGTZ` env vars removed
+
+These changes ensure smooth deployment in Coolify's containerized environment.
 
 ## Testing Locally
 
@@ -145,16 +128,16 @@ Before deploying to Coolify, test locally:
 
 ```bash
 # Start services
-docker compose -f docker-compose.yml -f docker-compose.coolify.yml up -d
+docker compose up -d
 
 # Check status
-docker compose -f docker-compose.yml -f docker-compose.coolify.yml ps
+docker compose ps
 
 # View logs
-docker compose -f docker-compose.yml -f docker-compose.coolify.yml logs -f
+docker compose logs -f
 
 # Stop services
-docker compose -f docker-compose.yml -f docker-compose.coolify.yml down
+docker compose down
 ```
 
 ## Production Checklist
