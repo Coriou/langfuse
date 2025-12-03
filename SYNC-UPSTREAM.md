@@ -53,16 +53,19 @@ git rebase upstream/main
 
 ### 4. Resolve conflicts (if any)
 
-If there are conflicts in `docker-compose.yml`:
+If there are conflicts in `docker-compose.yml`, you'll need to manually reapply your Coolify changes:
 
 ```bash
-# Edit the conflicted files
-# Keep your Coolify-specific changes for:
-# - Commented ports on ClickHouse, Redis, PostgreSQL
-# - MinIO console port (9091 instead of 127.0.0.1:9091)
-# - Simplified PostgreSQL env vars
+# After rebase, check what changed
+git diff v3.136.0 docker-compose.yml
 
-# After resolving
+# Manually reapply Coolify modifications:
+# - MinIO: Change to docker.io/minio/minio:latest with curl healthcheck
+# - Comment out ports for ClickHouse, Redis, PostgreSQL
+# - Remove Redis maxmemory-policy
+# - Simplify PostgreSQL env vars
+
+# After fixing
 git add docker-compose.yml
 git rebase --continue
 ```
@@ -75,25 +78,27 @@ git push origin custom --force-with-lease
 
 **Note**: `--force-with-lease` is safer than `--force` as it will fail if someone else pushed to your branch.
 
-## Your Docker Compose Modifications
+## Your Coolify-Specific Modifications
 
-The following changes are preserved in your `custom` branch:
-
-### ClickHouse
-- Commented out port bindings (8123, 9000) - services connect internally
+The following changes are maintained in your `custom` branch:
 
 ### MinIO
-- Changed console port from `127.0.0.1:9091:9001` to `9091:9001`
+- Uses `docker.io/minio/minio:latest` instead of `cgr.dev/chainguard/minio`
+- Healthcheck uses `curl` instead of `mc ready local`
+- Console port: `9091:9001` (not localhost-bound)
+
+### ClickHouse
+- Ports 8123, 9000 commented out (services connect internally)
 
 ### Redis
-- Commented out port binding (6379) - services connect internally
-- Removed `--maxmemory-policy noeviction` from command
+- Port 6379 commented out (services connect internally)
+- Removed `--maxmemory-policy noeviction` command flag
 
 ### PostgreSQL
-- Simplified `POSTGRES_USER` to `postgres` (no env var)
-- Simplified `POSTGRES_DB` to `postgres` (no env var)
+- Simplified `POSTGRES_USER` to `postgres` (no env var fallback)
+- Simplified `POSTGRES_DB` to `postgres` (no env var fallback)
 - Removed `TZ` and `PGTZ` environment variables
-- Commented out port binding (5432) - services connect internally
+- Port 5432 commented out (services connect internally)
 
 ## Troubleshooting
 
