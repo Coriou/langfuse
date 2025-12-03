@@ -26,7 +26,8 @@ This script will:
 4. Show you what will change
 5. Rebase your branch on top of upstream/main
 6. Preserve your Docker Compose modifications
-7. Optionally restore your stashed changes
+7. **Automatically update SHA-based image tags** to match the new version
+8. Optionally restore your stashed changes
 
 ## Manual Sync Process
 
@@ -86,6 +87,11 @@ The following changes are maintained in your `custom` branch:
 - Uses `docker.io/minio/minio:latest` instead of `cgr.dev/chainguard/minio`
 - Healthcheck uses `curl` instead of `mc ready local`
 - Console port: `9091:9001` (not localhost-bound)
+
+### Langfuse Images
+- Uses SHA-based tags (e.g., `sha-895c516`) instead of version tags (`:3`)
+- This pins deployments to specific builds for stability
+- **The sync script automatically updates these SHAs** when syncing to a new version
 
 ### ClickHouse
 - Ports 8123, 9000 commented out (services connect internally)
@@ -166,7 +172,7 @@ git remote add upstream git@github.com:langfuse/langfuse.git
 We recommend syncing regularly (e.g., weekly or before important updates):
 
 ```bash
-# 1. Sync upstream
+# 1. Sync upstream (automatically updates SHA tags)
 ./sync-upstream.sh
 
 # 2. Test locally if possible
