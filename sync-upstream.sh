@@ -86,6 +86,33 @@ echo "🔨 Rebasing custom branch on $TARGET..."
 if git rebase $TARGET; then
     echo "✅ Rebase successful!"
     echo ""
+    
+    # Check if docker-compose.yml uses SHA-based image tags and update them
+    if grep -q "langfuse.*:sha-" docker-compose.yml; then
+        echo "🔖 Detected SHA-based image tags, updating to match $TARGET..."
+        
+        # Get the commit SHA for the target
+        if [ "$SYNC_TARGET" == "main" ]; then
+            NEW_SHA=$(git rev-parse --short upstream/main)
+        else
+            # For tags, find the commit SHA
+            NEW_SHA=$(git rev-list -n 1 $TARGET | cut -c1-7)
+        fi
+        
+        echo "📝 Updating image tags to sha-$NEW_SHA..."
+        
+        # Update both langfuse images to use the new SHA
+        sed -i '' "s|langfuse/langfuse-worker:sha-[a-f0-9]*|langfuse/langfuse-worker:sha-$NEW_SHA|g" docker-compose.yml
+        sed -i '' "s|langfuse/langfuse:sha-[a-f0-9]*|langfuse/langfuse:sha-$NEW_SHA|g" docker-compose.yml
+        
+        # Commit the SHA update
+        git add docker-compose.yml
+        git commit -m "chore: update Docker image tags to sha-$NEW_SHA for $TARGET"
+        
+        echo "✅ Image tags updated and committed"
+    fi
+    
+    echo ""
     echo "📝 Your Docker Compose changes for Coolify have been preserved."
     echo ""
     echo "🔍 Verifying changes..."
