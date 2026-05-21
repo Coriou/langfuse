@@ -95,6 +95,7 @@ services:
     environment:
       <<: *langfuse-worker-env
       NODE_OPTIONS: --max-old-space-size=900
+      HOSTNAME: 0.0.0.0  # Next.js 16 standalone binds to HOSTNAME; default container hostname makes localhost healthchecks fail
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-mysecret} # CHANGEME
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
