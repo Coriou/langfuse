@@ -1,0 +1,9 @@
+<clickhouse>
+  <!--
+    Default config.xml in the official image listens on ::1/127.0.0.1 only.
+    Other containers on the docker network cannot reach CH that way, so
+    bind on all interfaces. Network exposure is still gated by Docker
+    (no host port published).
+  -->
+  <listen_host>0.0.0.0</listen_host>
+</clickhouse>
