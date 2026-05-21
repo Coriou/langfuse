@@ -7,11 +7,15 @@ This guide explains how to deploy Langfuse to Coolify using the custom branch.
 The `custom` branch is optimized for Coolify with these modifications:
 
 1. **MinIO**: Uses `docker.io/minio/minio:latest` with curl-based healthcheck (fixes Chainguard image issues)
-2. **Ports**: All localhost-bound ports commented out (services connect internally via Docker network)
-3. **PostgreSQL**: Simplified environment variables
-4. **Redis**: Removed `maxmemory-policy` directive
+2. **Ports**: All internal service ports commented out (Coolify routes via Docker network)
+3. **Web/worker**: Bound to `127.0.0.1` so only Coolify's Traefik can reach them
+4. **PostgreSQL**: Simplified env vars, tuned for small instances (128MB shared_buffers)
+5. **Redis**: `maxmemory 192mb` + persistent volume for BullMQ queue durability across redeploys
+6. **ClickHouse**: System-log TTL + log-rotation overrides mounted from `./clickhouse-config-d/`
+7. **Resource limits**: Memory caps on every service so one spike can't OOM the host
+8. **Healthcheck**: Explicit `/api/public/health` probe on langfuse-web for Coolify status
 
-Based on stable upstream tag **v3.136.0** for reliability.
+Based on stable upstream tag **v3.174.1** for reliability.
 
 ## Quick Start
 
@@ -113,14 +117,23 @@ POSTGRES_PASSWORD=<postgres-password>
 ## Summary of Changes
 
 Your `custom` branch differs from upstream in these ways:
-1. MinIO uses standard `docker.io/minio/minio:latest` image
-2. MinIO healthcheck uses `curl` instead of `mc`
-3. MinIO console port not localhost-bound (9091 instead of 127.0.0.1:9091)
-4. ClickHouse, Redis, PostgreSQL ports commented out
-5. Redis `maxmemory-policy` removed
-6. PostgreSQL `TZ` and `PGTZ` env vars removed
 
-These changes ensure smooth deployment in Coolify's containerized environment.
+**Coolify compatibility**
+1. MinIO uses standard `docker.io/minio/minio:latest` image with `curl` healthcheck
+2. MinIO console port not localhost-bound (`9091:9001`)
+3. ClickHouse, Redis, PostgreSQL ports commented out (Docker-network only)
+4. PostgreSQL `TZ` / `PGTZ` env vars removed (Coolify provides defaults)
+5. langfuse-web bound to `127.0.0.1:3000` (Coolify Traefik proxies to localhost)
+
+**Self-hosting tuning**
+6. `deploy.resources.limits` on every service (caps total Langfuse footprint to ~4GB)
+7. ClickHouse log-rotation + system-log TTL via `./clickhouse-config-d/`
+8. Redis `maxmemory 192mb` and persistent volume for BullMQ
+9. Postgres `shared_buffers=128MB` for small-RAM hosts
+10. langfuse-web healthcheck via `/api/public/health` for Coolify status
+
+These changes ensure smooth deployment in Coolify's containerized environment
+on small (≤8GB RAM) hosts.
 
 ## Testing Locally
 

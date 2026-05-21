@@ -5,7 +5,7 @@
 # External connections from other machines will not be able to reach these services directly.
 services:
   langfuse-worker:
-    image: docker.io/langfuse/langfuse-worker:sha-17bb2c0
+    image: docker.io/langfuse/langfuse-worker:sha-1e3535e
     restart: always
     depends_on: &langfuse-depends-on
       postgres:
@@ -18,6 +18,12 @@ services:
         condition: service_healthy
     ports:
       - 127.0.0.1:3030:3030
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 256M
     environment: &langfuse-worker-env
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/postgres} # CHANGEME
@@ -70,11 +76,23 @@ services:
       SMTP_CONNECTION_URL: ${SMTP_CONNECTION_URL:-}
 
   langfuse-web:
-    image: docker.io/langfuse/langfuse:sha-17bb2c0
+    image: docker.io/langfuse/langfuse:sha-1e3535e
     restart: always
     depends_on: *langfuse-depends-on
     ports:
-      - 3000:3000
+      - 127.0.0.1:3000:3000
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/public/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     environment:
       <<: *langfuse-worker-env
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-mysecret} # CHANGEME
@@ -92,6 +110,16 @@ services:
     image: docker.io/clickhouse/clickhouse-server
     restart: always
     user: "101:101"
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+        reservations:
+          memory: 512M
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     environment:
       CLICKHOUSE_DB: default
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
@@ -99,6 +127,7 @@ services:
     volumes:
       - langfuse_clickhouse_data:/var/lib/clickhouse
       - langfuse_clickhouse_logs:/var/log/clickhouse-server
+      - ./clickhouse-config-d:/etc/clickhouse-server/config.d:ro
     # ports:
       # - 127.0.0.1:8123:8123
       # - 127.0.0.1:9000:9000
@@ -122,6 +151,12 @@ services:
       - 9091:9001
     volumes:
       - langfuse_minio_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -135,12 +170,22 @@ services:
     # CHANGEME: row below to secure redis password
     command: >
       --requirepass ${REDIS_AUTH:-myredissecret}
+      --maxmemory 192mb
+      --maxmemory-policy noeviction
+      --save 60 1000
+      --appendonly no
     # ports:
       # - 127.0.0.1:6379:6379
     volumes:
       - langfuse_redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_AUTH:-myredissecret}", "ping"]
       interval: 3s
       timeout: 10s
       retries: 10
@@ -161,6 +206,20 @@ services:
       # - 127.0.0.1:5432:5432
     volumes:
       - langfuse_postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - max_connections=100
 
 volumes:
   langfuse_postgres_data:

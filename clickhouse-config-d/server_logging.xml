@@ -1,0 +1,12 @@
+<clickhouse>
+  <!--
+    Reduce on-disk server log noise on a small self-hosted instance.
+    Defaults rotate at ~1GB and keep many archives; this caps total log
+    footprint to ~60MB without losing warning/error visibility.
+  -->
+  <logger>
+    <level>warning</level>
+    <size>10M</size>
+    <count>5</count>
+  </logger>
+</clickhouse>
