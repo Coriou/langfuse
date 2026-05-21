@@ -21,9 +21,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 512M
         reservations:
-          memory: 256M
+          memory: 192M
     environment: &langfuse-worker-env
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/postgres} # CHANGEME
@@ -84,9 +84,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 1280M
         reservations:
-          memory: 256M
+          memory: 384M
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/public/health"]
       interval: 30s
@@ -95,6 +95,7 @@ services:
       start_period: 60s
     environment:
       <<: *langfuse-worker-env
+      NODE_OPTIONS: --max-old-space-size=900
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-mysecret} # CHANGEME
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
