@@ -6,16 +6,21 @@ This guide explains how to deploy Langfuse to Coolify using the custom branch.
 
 The `custom` branch is optimized for Coolify with these modifications:
 
-1. **MinIO**: Uses `docker.io/minio/minio:latest` with curl-based healthcheck (fixes Chainguard image issues)
+1. **MinIO**: Uses `docker.io/minio/minio` with curl-based healthcheck (fixes Chainguard image issues)
 2. **Ports**: All internal service ports commented out (Coolify routes via Docker network)
 3. **Web/worker**: Bound to `127.0.0.1` so only Coolify's Traefik can reach them
 4. **PostgreSQL**: Simplified env vars, tuned for small instances (128MB shared_buffers)
 5. **Redis**: `maxmemory 192mb` + persistent volume for BullMQ queue durability across redeploys
-6. **ClickHouse**: System-log TTL + log-rotation overrides mounted from `./clickhouse-config-d/`
+6. **ClickHouse**: Memory cap + system-log TTL + log-rotation overrides mounted from `./clickhouse-config-d/`
 7. **Resource limits**: Memory caps on every service so one spike can't OOM the host
 8. **Healthcheck**: Explicit `/api/public/health` probe on langfuse-web for Coolify status
 
-Based on stable upstream tag **v3.174.1** for reliability.
+Based on stable upstream tag **v3.225.2** for reliability.
+
+> **Why not v3.225.3?** It is the newer v3 git tag, but upstream never published a
+> container image for it — neither `langfuse/langfuse:sha-f6c77b7` nor `:3.225.3`
+> exists on Docker Hub or ghcr.io. Since we deploy prebuilt images, there is nothing
+> to pull. Revisit if upstream backfills that build.
 
 ## Quick Start
 
@@ -33,7 +38,7 @@ The `custom` branch contains these Coolify-specific changes:
 
 ### MinIO Service
 ```yaml
-image: docker.io/minio/minio:latest  # Instead of cgr.dev/chainguard/minio
+image: docker.io/minio/minio:RELEASE.2025-07-23T15-54-02Z  # Instead of cgr.dev/chainguard/minio
 healthcheck:
   test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
 ports:
@@ -50,18 +55,29 @@ All internal service ports are commented out - they communicate via Docker netwo
 
 ## Keeping in Sync with Upstream
 
-Sync to the latest stable release:
+> **Do not run `./sync-upstream.sh` unattended.** It picks the highest stable tag
+> (`sort -V | tail -1`), which now resolves to **v4.x**. We are deliberately on the v3
+> line, so the script would rebase us straight onto a major version. Pass an explicit
+> v3 tag or rebase by hand until the script learns a version constraint.
+
+To sync manually to a chosen v3 tag:
 
 ```bash
-./sync-upstream.sh
+git fetch upstream --tags
+git rebase v3.225.2          # or whichever v3 tag you intend
 ```
 
-This will:
-1. Fetch the latest stable tag from upstream
-2. Rebase your custom branch on top of it
-3. Preserve your Coolify-specific modifications
+Then update the two Langfuse image tags in `docker-compose.yml` to the `sha-<7char>`
+of that tag's commit — and **verify the image actually exists** before committing:
 
-**Note**: After syncing, you'll need to manually reapply the Coolify changes (MinIO image, port comments, etc.) if upstream modified those sections.
+```bash
+docker manifest inspect docker.io/langfuse/langfuse:sha-<7char>
+```
+
+Not every upstream git tag gets a published image (v3.225.3 did not).
+
+**Note**: After syncing, check that the Coolify changes survived (MinIO image, port
+comments, etc.) in case upstream modified those sections.
 
 ## Troubleshooting
 
@@ -110,7 +126,7 @@ POSTGRES_PASSWORD=<postgres-password>
 ## Branch Strategy
 
 - **`main`**: Tracks upstream/main (for reference only)
-- **`custom`**: Based on stable tags (e.g., v3.136.0) with Coolify modifications
+- **`custom`**: Based on stable v3 tags (currently v3.225.2) with Coolify modifications
   - **Deploy this branch to Coolify**
   - Sync regularly with `./sync-upstream.sh` to get new releases
 
@@ -119,7 +135,7 @@ POSTGRES_PASSWORD=<postgres-password>
 Your `custom` branch differs from upstream in these ways:
 
 **Coolify compatibility**
-1. MinIO uses standard `docker.io/minio/minio:latest` image with `curl` healthcheck
+1. MinIO uses standard `docker.io/minio/minio` image with `curl` healthcheck
 2. MinIO console port not localhost-bound (`9091:9001`)
 3. ClickHouse, Redis, PostgreSQL ports commented out (Docker-network only)
 4. PostgreSQL `TZ` / `PGTZ` env vars removed (Coolify provides defaults)
@@ -127,10 +143,44 @@ Your `custom` branch differs from upstream in these ways:
 
 **Self-hosting tuning**
 6. `deploy.resources.limits` on every service (caps total Langfuse footprint to ~4GB)
-7. ClickHouse log-rotation + system-log TTL via `./clickhouse-config-d/`
+7. ClickHouse memory cap + log-rotation + system-log TTL via `./clickhouse-config-d/`
 8. Redis `maxmemory 192mb` and persistent volume for BullMQ
 9. Postgres `shared_buffers=128MB` for small-RAM hosts
 10. langfuse-web healthcheck via `/api/public/health` for Coolify status
+11. All four images pinned to exact versions (see "Image pinning" below)
+
+### ClickHouse config overrides
+
+Everything in `./clickhouse-config-d/` is mounted read-only at
+`/etc/clickhouse-server/config.d`:
+
+| File | Purpose |
+|---|---|
+| `memory_limits.xml` | Caps the server memory budget so it fits the 1.5 GiB cgroup |
+| `listen_host.xml` | Binds `0.0.0.0` so other containers can connect |
+| `server_logging.xml` | Log level + rotation |
+| `system_logs_ttl.xml` | TTL on `system.*` tables so they don't grow unbounded |
+
+`memory_limits.xml` is load-bearing. ClickHouse sizes its default memory budget from
+**host** RAM, not from the container's cgroup limit — on an 8 GB host it plans for
+~6.8 GiB inside a 1.5 GiB cgroup and is OOM-killed on every start. Without this file
+the container crash-loops indefinitely (it once did so 94,000+ times over two months).
+
+**Coolify re-materialises this directory from git on every deploy.** A fix applied by
+hand on the host will be silently reverted the next time you deploy. Edit these files
+here, in the repo, never on the server.
+
+### Image pinning
+
+| Service | Pinned to |
+|---|---|
+| langfuse-web / langfuse-worker | `sha-8ff44b6` (v3.225.2) |
+| clickhouse-server | `25.7.3.13` |
+| minio | `RELEASE.2025-07-23T15-54-02Z` |
+
+ClickHouse and MinIO previously floated on `:latest`, which meant a redeploy could pull
+a new major version with no commit to point at. Both are now explicit. `redis:7` and
+`postgres:17` still float within a major version, matching upstream's default.
 
 These changes ensure smooth deployment in Coolify's containerized environment
 on small (≤8GB RAM) hosts.
