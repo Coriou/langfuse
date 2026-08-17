@@ -109,7 +109,7 @@ services:
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
 
   clickhouse:
-    image: docker.io/clickhouse/clickhouse-server
+    image: docker.io/clickhouse/clickhouse-server:25.7.3.13
     restart: always
     user: "101:101"
     deploy:
@@ -141,7 +141,7 @@ services:
       start_period: 1s
 
   minio:
-    image: docker.io/minio/minio:latest
+    image: docker.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
     restart: always
     # create the 'langfuse' bucket before starting the service
     command: server /data --address ":9000" --console-address ":9001"
