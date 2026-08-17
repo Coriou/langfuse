@@ -15,7 +15,7 @@ These changes are maintained on top of the latest upstream code using git rebase
 
 ## Read this before syncing
 
-Three things will bite you if you sync on autopilot:
+Four things will bite you if you sync on autopilot:
 
 **1. `sync-upstream.sh` will jump you to v4.** It selects the highest stable tag with
 `git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1`, which today
@@ -37,11 +37,53 @@ If it 404s, fall back to the newest v3 tag that does have an image, and say so i
 commit message. Do not sync the source tree to a version you cannot actually run —
 that just makes the docs assert something untrue.
 
-**3. `clickhouse-config-d/` is repo-owned.** Coolify re-materialises that directory
+**3. The deployment host is ARM — check the architecture, not just the tag.**
+`apps.coriou.net` is aarch64 (Hetzner ARM). An amd64-only image is a **hard blocker**
+here, not a slow fallback: it will not run at all. The `docker manifest inspect` above
+also answers this — confirm `linux/arm64` appears in the platform list before
+committing any image bump, for ClickHouse and MinIO as much as for Langfuse:
+
+```bash
+docker manifest inspect docker.io/<image>:<tag> \
+  | jq -r '.manifests[].platform | .os + "/" + .architecture'
+```
+
+All four currently pinned images publish both `linux/amd64` and `linux/arm64`.
+
+**4. `clickhouse-config-d/` is repo-owned.** Coolify re-materialises that directory
 from git on every deploy, so anything edited directly on the host is silently reverted
 the next time you deploy. This has already cost us once: `memory_limits.xml` lived
 only on the server, and any deploy would have wiped it and reinstated a ClickHouse
 OOM crash-loop. Make changes here, commit them, then deploy.
+
+## Open tracking item: v3.225.3
+
+**Status as of 2026-08-17: skipped, deliberately. Re-check on the next sync.**
+
+`v3.225.3` (commit `f6c77b70`) is a real upstream git tag, newer than the `v3.225.2`
+this branch is built on, but **no container image was ever published for it** —
+`langfuse/langfuse:sha-f6c77b7` and `:3.225.3` are both absent from Docker Hub and
+ghcr.io. On its release date upstream built only 4.10.0, so the v3 backport release
+appears to have been tagged without a corresponding image build.
+
+It contains exactly two security backports:
+
+| Fix | Upstream PR |
+|---|---|
+| SCIM: ignore the `password` attribute in user provisioning | #16027 |
+| API: validate `authorUserId` on public comment creation | #16026 |
+
+Neither looks likely to apply to this deployment — SCIM provisioning is an enterprise
+feature we are almost certainly not using, and the second needs the public comment
+surface to be in use. **But "probably not applicable" is a reason to defer, not to
+forget.** Both fixes ship inside the image, so they are unreachable until upstream
+publishes one.
+
+**On the next sync:** re-run the `docker manifest inspect` check for `sha-f6c77b7`. If
+an image has appeared, bump to it and delete this section. If v3 has moved on past
+3.225.3 by then, verify the newer tag carries both fixes and bump to that instead.
+Do not build the image locally — an unofficial image has no place in this deployment
+path.
 
 ## Quick Sync (Automated)
 

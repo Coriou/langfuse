@@ -182,6 +182,15 @@ ClickHouse and MinIO previously floated on `:latest`, which meant a redeploy cou
 a new major version with no commit to point at. Both are now explicit. `redis:7` and
 `postgres:17` still float within a major version, matching upstream's default.
 
+**The host is ARM.** `apps.coriou.net` is aarch64 (Hetzner ARM), so an amd64-only image
+is a hard blocker — it will not run at all. All four pinned images publish both
+`linux/amd64` and `linux/arm64`. Verify the platform list before any bump:
+
+```bash
+docker manifest inspect docker.io/<image>:<tag> \
+  | jq -r '.manifests[].platform | .os + "/" + .architecture'
+```
+
 These changes ensure smooth deployment in Coolify's containerized environment
 on small (≤8GB RAM) hosts.
 
