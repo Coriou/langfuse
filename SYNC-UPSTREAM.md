@@ -15,33 +15,59 @@ These changes are maintained on top of the latest upstream code using git rebase
 
 ## Read this before syncing
 
-Four things will bite you if you sync on autopilot:
+Four things will bite you if you sync on autopilot. **`sync-upstream.sh` now enforces
+the first three itself** — they are documented here because you still need to
+understand what it is protecting you from, and because the manual process below has
+no such guardrails.
 
-**1. `sync-upstream.sh` will jump you to v4.** It selects the highest stable tag with
-`git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1`, which today
-resolves to a **v4.x** release. This deployment is deliberately on the **v3** line.
-Until the script grows a version constraint, either rebase manually onto an explicit
-v3 tag or pass one in — do not run it unattended.
+**1. Upstream is on v4; this deployment is deliberately on the v3 line.** The script
+will *not* cross a major version implicitly. Its default target is the highest tag
+within the major line the branch is currently based on (detected via
+`git describe --tags --abbrev=0`). If a newer major exists it says so and declines:
+
+```
+🏷️  Target: v3.225.3 — highest tag in the current v3 line (commit f6c77b7)
+ℹ️  Upstream's newest release is v4.11.0, deliberately NOT chosen:
+    crossing a major version requires --allow-major or --tag v4.11.0.
+```
+
+Moving to v4 is a deliberate act requiring `--allow-major` or an explicit
+`--tag v4.x.y`. Do not add either to a scheduled job.
 
 **2. Not every upstream git tag has a published image.** We deploy prebuilt images, so
 a git tag with no corresponding build is not deployable. `v3.225.3` is exactly this
 case: the tag exists, but neither `langfuse/langfuse:sha-f6c77b7` nor `:3.225.3` was
-ever pushed to Docker Hub or ghcr.io. Always confirm before committing a tag bump:
+ever pushed to Docker Hub or ghcr.io.
+
+The script now runs a registry preflight against **both** `langfuse/langfuse` and
+`langfuse/langfuse-worker` before it rewrites anything, and aborts with the newest
+usable tag as a suggestion:
+
+```
+🔍 Registry preflight for sha-f6c77b7 (need linux/arm64):
+   ❌ langfuse/langfuse:sha-f6c77b7 — NOT PUBLISHED (registry 404)
+   ❌ langfuse/langfuse-worker:sha-f6c77b7 — NOT PUBLISHED (registry 404)
+   👉 Newest tag in this line that IS published for linux/arm64: v3.225.2
+```
+
+To check a tag by hand (e.g. for ClickHouse or MinIO, which the script does not
+manage):
 
 ```bash
 docker manifest inspect docker.io/langfuse/langfuse:sha-<7char>
 docker manifest inspect docker.io/langfuse/langfuse-worker:sha-<7char>
 ```
 
-If it 404s, fall back to the newest v3 tag that does have an image, and say so in the
-commit message. Do not sync the source tree to a version you cannot actually run —
-that just makes the docs assert something untrue.
+Never sync the source tree to a version you cannot actually run — that just makes the
+docs assert something untrue.
 
 **3. The deployment host is ARM — check the architecture, not just the tag.**
 `apps.coriou.net` is aarch64 (Hetzner ARM). An amd64-only image is a **hard blocker**
-here, not a slow fallback: it will not run at all. The `docker manifest inspect` above
-also answers this — confirm `linux/arm64` appears in the platform list before
-committing any image bump, for ClickHouse and MinIO as much as for Langfuse:
+here, not a slow fallback: it will not run at all. The script's preflight requires
+`linux/arm64` in the manifest platform list and aborts if it is missing (override the
+expected platform with `REQUIRED_PLATFORM=` if this ever moves off ARM).
+
+For images the script does not manage — ClickHouse and MinIO — check by hand:
 
 ```bash
 docker manifest inspect docker.io/<image>:<tag> \
@@ -79,30 +105,53 @@ surface to be in use. **But "probably not applicable" is a reason to defer, not 
 forget.** Both fixes ship inside the image, so they are unreachable until upstream
 publishes one.
 
-**On the next sync:** re-run the `docker manifest inspect` check for `sha-f6c77b7`. If
-an image has appeared, bump to it and delete this section. If v3 has moved on past
-3.225.3 by then, verify the newer tag carries both fixes and bump to that instead.
+**On the next sync:** you no longer need to remember this — `./sync-upstream.sh` will
+resolve `v3.225.3` as the default target, run the registry preflight, fail closed, and
+report that `v3.225.2` is the newest usable tag. If an image has since appeared the
+preflight passes and the sync proceeds normally; delete this section when it does. If
+v3 has moved on past 3.225.3 by then, verify the newer tag carries both fixes.
 Do not build the image locally — an unofficial image has no place in this deployment
 path.
 
 ## Quick Sync (Automated)
 
 ```bash
-./sync-upstream.sh
+./sync-upstream.sh --dry-run     # always start here: prints the full plan, changes nothing
+./sync-upstream.sh               # then run it for real
 ```
 
-This script will:
-1. Check that you're on the `custom` branch
-2. Stash any uncommitted changes
-3. Fetch the latest changes from upstream
-4. Show you what will change
-5. Rebase your branch on top of the selected target
-6. Preserve your Docker Compose modifications
-7. **Automatically update SHA-based image tags** to match the new version
-8. Optionally restore your stashed changes
+The script will:
+1. Offer to stash uncommitted changes, then check you're on the `custom` branch
+2. Fetch upstream (branches and tags)
+3. Detect the major line the branch is currently based on
+4. Resolve a target tag — **highest tag in the current major line**, never crossing a
+   major implicitly
+5. **Registry preflight**: abort unless both `langfuse/langfuse` and
+   `langfuse/langfuse-worker` publish `sha-<target>` *and* it includes `linux/arm64`
+6. Print the plan (current base → target, old image tag → new image tag, the upstream
+   commits being picked up) and ask for confirmation
+7. Rebase, preserving your Docker Compose modifications
+8. **Automatically update SHA-based image tags** to match the new version and commit
+9. Optionally restore your stashed changes, then remind you to force-push and to tag a
+   rollback point first
 
-Note step 7 rewrites the tag without checking that the image exists, and the target in
-step 5 is subject to the v4 caveat above. Verify both by hand afterwards.
+### Flags
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Print the whole plan and exit. Changes nothing. |
+| `--yes`, `-y`, `--non-interactive` | Assume "yes" at every prompt. Safe for CI — the major-version and image guards still abort. |
+| `--tag vX.Y.Z` | Rebase onto an exact tag. Deliberate, so it may cross a major. |
+| `--main` | Rebase onto `upstream/main`. Needs `--allow-major` if that crosses a major. |
+| `--allow-major` | Permit crossing to a higher major version. |
+| `--skip-image-check` | Escape hatch that disables the registry preflight. This is the check that prevents rebasing onto an unbuildable tag — you almost never want this. |
+| `--help` | Usage. |
+
+Environment overrides: `UPSTREAM_REMOTE`, `WORK_BRANCH`, `COMPOSE_FILE`,
+`REQUIRED_PLATFORM`.
+
+Exit codes: `0` success or already up to date, `1` refused (major crossing, missing
+image, wrong architecture, rebase conflict).
 
 ## Manual Sync Process
 
@@ -284,17 +333,21 @@ git remote add upstream git@github.com:langfuse/langfuse.git
 We recommend syncing regularly (e.g., weekly or before important updates):
 
 ```bash
-# 1. Rebase onto the chosen v3 tag (see caveats above before using the script)
-git fetch upstream --tags
-git rebase v3.225.2
+# 1. See what a sync would do — no changes, and it will refuse anything unsafe
+./sync-upstream.sh --dry-run
 
-# 2. Bump the two Langfuse image tags, and verify the image exists
-docker manifest inspect docker.io/langfuse/langfuse:sha-<7char>
+# 2. Tag a rollback point at the CURRENT remote state before rewriting anything
+git fetch origin
+git tag custom-pre-$(date -u +%Y%m%d) origin/custom
+git push origin custom-pre-$(date -u +%Y%m%d)
 
-# 3. Test locally if possible
+# 3. Run the sync (rebases, verifies images, bumps the sha- tags, commits)
+./sync-upstream.sh
+
+# 4. Test locally if possible
 docker compose up -d
 
-# 4. Push to your fork
+# 5. Push to your fork — rebase workflow, so this must be forced
 git push origin custom --force-with-lease
 
 # 5. Deploy to Coolify (triggers automatically if configured)
