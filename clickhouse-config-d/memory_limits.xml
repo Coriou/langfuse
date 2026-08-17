@@ -1,0 +1,29 @@
+<clickhouse>
+  <!--
+    ClickHouse sizes its default memory budget from HOST RAM, not from the
+    container's cgroup limit. On this box that meant it planned for ~6.8 GiB
+    (0.9 x 7.6 GiB host) inside a 1.5 GiB cgroup, and was OOM-killed on every
+    start for ~2 months (94k+ restarts, never reached "Ready for connections").
+
+    These caps make the budget explicit and keep it well under the cgroup
+    ceiling, leaving headroom for jemalloc arenas and thread stacks that the
+    server's own accounting does not track.
+
+    If the container limit is ever raised, raise max_server_memory_usage with
+    it — keep it at roughly 2/3 of the cgroup limit.
+
+    DO NOT set <background_pool_size> here without also lowering the
+    <merge_tree> dependents (number_of_free_entries_in_pool_to_execute_mutation
+    defaults to 20 and must be <= the pool size). Setting it to 4 alone makes
+    the server refuse to start with "Code: 36 ... sanityCheck". Learned the
+    hard way 2026-08-17.
+  -->
+  <max_server_memory_usage>1073741824</max_server_memory_usage>   <!-- 1.0 GiB of a 1.5 GiB cgroup -->
+  <mark_cache_size>268435456</mark_cache_size>                    <!-- 256 MiB; upstream default is 5 GiB -->
+  <max_concurrent_queries>20</max_concurrent_queries>
+  <profiles>
+    <default>
+      <max_memory_usage>536870912</max_memory_usage>              <!-- 512 MiB per query -->
+    </default>
+  </profiles>
+</clickhouse>
