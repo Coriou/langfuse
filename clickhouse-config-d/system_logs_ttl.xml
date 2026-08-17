@@ -3,6 +3,27 @@
     Cap ClickHouse's internal system_logs so a small self-hosted instance
     does not blow up disk usage. Langfuse only needs query/part history,
     not weeks of telemetry on itself.
+
+    NOTE: A system table whose default config.xml entry already specifies an
+    <engine> cannot take a separate <ttl> here. ClickHouse refuses to start:
+
+      Code: 36. DB::Exception: If 'engine' is specified for system table,
+      TTL parameters should be specified directly inside 'engine' and 'ttl'
+      setting doesn't make sense. (BAD_ARGUMENTS)
+
+    In 25.7.3.13 that applies to opentelemetry_span_log, which is therefore
+    omitted below. Before adding a table here, check whether the stock
+    /etc/clickhouse-server/config.xml defines an engine for it, by running
+    sed over that file inside the image and looking for an engine element in
+    the table's block.
+
+    (Careful: a double hyphen is illegal inside an XML comment, so command
+    flags cannot be written out here. ClickHouse rejects the whole file with
+    a SAXParseException if you try.)
+
+    Verified 2026-08-17 against clickhouse-server 25.7.3.13 (aarch64): this
+    file starts cleanly ("Ready for connections"); re-adding
+    opentelemetry_span_log makes the server exit 36 on startup.
   -->
   <text_log>                <ttl>event_date + INTERVAL 3 DAY DELETE</ttl></text_log>
   <trace_log>               <ttl>event_date + INTERVAL 3 DAY DELETE</ttl></trace_log>
@@ -11,6 +32,5 @@
   <latency_log>             <ttl>event_date + INTERVAL 3 DAY DELETE</ttl></latency_log>
   <query_log>               <ttl>event_date + INTERVAL 7 DAY DELETE</ttl></query_log>
   <part_log>                <ttl>event_date + INTERVAL 7 DAY DELETE</ttl></part_log>
-  <opentelemetry_span_log>  <ttl>event_date + INTERVAL 3 DAY DELETE</ttl></opentelemetry_span_log>
   <query_metric_log>        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl></query_metric_log>
 </clickhouse>
