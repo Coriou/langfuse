@@ -159,16 +159,26 @@ Everything in `./clickhouse-config-d/` is mounted read-only at
 | `memory_limits.xml` | Caps the server memory budget so it fits the 1.5 GiB cgroup |
 | `listen_host.xml` | Binds `0.0.0.0` so other containers can connect |
 | `server_logging.xml` | Log level + rotation |
-| `system_logs_ttl.xml` | TTL on `system.*` tables so they don't grow unbounded |
+| `system_logs_ttl.xml` | 7-day TTL on the two `system.*_log` tables that are kept (`query_log`, `part_log`) |
+| `zz-disable-system-logs.xml` | Disables the rest of ClickHouse's self-telemetry logs (`zz-` so it merges last) |
 
 `memory_limits.xml` is load-bearing. ClickHouse sizes its default memory budget from
 **host** RAM, not from the container's cgroup limit — on an 8 GB host it plans for
 ~6.8 GiB inside a 1.5 GiB cgroup and is OOM-killed on every start. Without this file
 the container crash-loops indefinitely (it once did so 94,000+ times over two months).
 
-**Coolify re-materialises this directory from git on every deploy.** A fix applied by
-hand on the host will be silently reverted the next time you deploy. Edit these files
-here, in the repo, never on the server.
+**Coolify does NOT re-materialise this directory from git on this app.** App 6 has
+`application_settings.is_preserve_repository_enabled = false` (verified 2026-09-04), so
+Coolify clones the repo into `/artifacts/<deploy-uuid>` inside its helper container, runs
+`docker compose ... up -d` from there, and only rewrites `docker-compose.yaml`, `.env` and
+`README.md` under `/data/coolify/applications/rgws84k0g8sooookkw80c4kk/`. The **live**
+ClickHouse config is therefore the hand-maintained host directory
+`/data/coolify/applications/rgws84k0g8sooookkw80c4kk/clickhouse-config-d/`, bind-mounted
+`:ro`. So a change must be applied in **both** places and kept byte-identical (`md5sum`
+both sides): here in the repo (source of truth for any fresh clone, and for the day
+"Preserve Repository During Deployment" is switched on) **and** on the host (what the
+running server actually reads). Editing only the repo changes nothing on the server;
+editing only the host is lost on the next fresh clone.
 
 ### Image pinning
 

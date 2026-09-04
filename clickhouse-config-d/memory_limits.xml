@@ -4,26 +4,57 @@
     container's cgroup limit. On this box that meant it planned for ~6.8 GiB
     (0.9 x 7.6 GiB host) inside a 1.5 GiB cgroup, and was OOM-killed on every
     start for ~2 months (94k+ restarts, never reached "Ready for connections").
+    Fixed 2026-08-17 with an explicit max_server_memory_usage.
 
-    These caps make the budget explicit and keep it well under the cgroup
-    ceiling, leaving headroom for jemalloc arenas and thread stacks that the
-    server's own accounting does not track.
+    2026-09-04 second incident: the 1.0 GiB cap is enforced against RSS, and
+    RSS carries ~330 MiB of executable code pages plus jemalloc fragmentation
+    and ~800 thread stacks, so the usable budget was ~650 MiB. With 16 merge
+    threads and every default cache sized for host RAM, every background
+    merge failed (Code 241) and was retried instantly: ~3,850 failures/min,
+    3 cores burned for 18 days, 15k unmerged parts in system.* log tables.
+    Fix = cap the caches and pools that were still host-sized, give merges a
+    soft limit so they back off instead of failing, and (see
+    zz-disable-system-logs.xml) stop writing telemetry nobody reads.
 
-    If the container limit is ever raised, raise max_server_memory_usage with
-    it — keep it at roughly 2/3 of the cgroup limit.
+    Cgroup is 1536 MiB (docker-compose.yml, clickhouse service). The cap below
+    is 1152 MiB = 75% of it, leaving ~384 MiB for the page cache that holds
+    the binary's own code pages (evicting those cost 3.3M major faults) and
+    kernel/slab. If the container limit is ever raised, move this with it.
 
-    DO NOT set <background_pool_size> here without also lowering the
-    <merge_tree> dependents (number_of_free_entries_in_pool_to_execute_mutation
-    defaults to 20 and must be <= the pool size). Setting it to 4 alone makes
-    the server refuse to start with "Code: 36 ... sanityCheck". Learned the
-    hard way 2026-08-17.
+    DO NOT set <background_pool_size> without ALL THREE <merge_tree> entries
+    below. sanityCheck compares them against background_pool_size *
+    background_merges_mutations_concurrency_ratio (4 * 2 = 8) and refuses to
+    start with "Code: 36 ... MergeTreeSettingsImpl::sanityCheck" if any is
+    larger. Defaults are 20 / 8 / 25. Learned the hard way 2026-08-17.
   -->
-  <max_server_memory_usage>1073741824</max_server_memory_usage>   <!-- 1.0 GiB of a 1.5 GiB cgroup -->
-  <mark_cache_size>268435456</mark_cache_size>                    <!-- 256 MiB; upstream default is 5 GiB -->
+  <max_server_memory_usage>1207959552</max_server_memory_usage>           <!-- 1152 MiB of the 1536 MiB cgroup -->
+  <mark_cache_size>134217728</mark_cache_size>                            <!-- 128 MiB; upstream default 5 GiB -->
+  <uncompressed_cache_size>67108864</uncompressed_cache_size>             <!-- 64 MiB; default 8 GiB -->
+  <primary_index_cache_size>67108864</primary_index_cache_size>           <!-- 64 MiB; default 5 GiB -->
+  <index_mark_cache_size>67108864</index_mark_cache_size>                 <!-- 64 MiB; default 5 GiB -->
   <max_concurrent_queries>20</max_concurrent_queries>
+
+  <background_pool_size>4</background_pool_size>                          <!-- default 16 -->
+  <background_schedule_pool_size>32</background_schedule_pool_size>       <!-- default 512 -->
+  <background_common_pool_size>4</background_common_pool_size>            <!-- default 8 -->
+  <background_move_pool_size>2</background_move_pool_size>                <!-- default 8 -->
+  <background_fetches_pool_size>2</background_fetches_pool_size>          <!-- default 16; replicated only -->
+  <background_buffer_flush_schedule_pool_size>2</background_buffer_flush_schedule_pool_size>       <!-- default 16 -->
+  <background_distributed_schedule_pool_size>2</background_distributed_schedule_pool_size>         <!-- default 16 -->
+  <background_message_broker_schedule_pool_size>2</background_message_broker_schedule_pool_size>   <!-- default 16 -->
+  <max_thread_pool_size>1000</max_thread_pool_size>                       <!-- stock config.xml sets 10000 -->
+  <max_thread_pool_free_size>64</max_thread_pool_free_size>               <!-- default 1000; release idle stacks -->
+  <merges_mutations_memory_usage_soft_limit>402653184</merges_mutations_memory_usage_soft_limit>   <!-- 384 MiB; default 0 = 0.5 x HOST RAM -->
+
+  <merge_tree>
+    <number_of_free_entries_in_pool_to_execute_mutation>2</number_of_free_entries_in_pool_to_execute_mutation>
+    <number_of_free_entries_in_pool_to_lower_max_size_of_merge>2</number_of_free_entries_in_pool_to_lower_max_size_of_merge>
+    <number_of_free_entries_in_pool_to_execute_optimize_entire_partition>4</number_of_free_entries_in_pool_to_execute_optimize_entire_partition>
+  </merge_tree>
+
   <profiles>
     <default>
-      <max_memory_usage>536870912</max_memory_usage>              <!-- 512 MiB per query -->
+      <max_memory_usage>536870912</max_memory_usage>                      <!-- 512 MiB per query -->
     </default>
   </profiles>
 </clickhouse>

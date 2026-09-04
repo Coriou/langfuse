@@ -1,0 +1,32 @@
+<clickhouse>
+  <!--
+    Disable ClickHouse's self-telemetry tables. On a 1.5 GiB single-node
+    instance whose only client is Langfuse they are pure overhead, and on
+    2026-09-04 they were the entire load problem (15k unmerged parts in
+    latency_log / trace_log / asynchronous_metric_log / error_log; failed
+    merges logging into text_log and error_log, creating more parts).
+
+    Kept: query_log, part_log (TTL in system_logs_ttl.xml), crash_log.
+    The stock 25.7.3.13 config.xml enables every table listed below.
+
+    NOTE: disabling a log does not drop an existing table. After the first
+    restart with this file, DROP TABLE system.<name> SYNC any leftovers
+    (see runbooks/clickhouse-merge-loop-fix.md, step A1) or they keep
+    merging forever. With the log disabled they are not recreated.
+  -->
+  <metric_log remove="1"/>
+  <asynchronous_metric_log remove="1"/>
+  <latency_log remove="1"/>
+  <error_log remove="1"/>
+  <trace_log remove="1"/>
+  <text_log remove="1"/>
+  <processors_profile_log remove="1"/>
+  <opentelemetry_span_log remove="1"/>
+  <query_thread_log remove="1"/>
+  <query_views_log remove="1"/>
+  <query_metric_log remove="1"/>
+  <asynchronous_insert_log remove="1"/>
+  <backup_log remove="1"/>
+  <blob_storage_log remove="1"/>
+  <s3queue_log remove="1"/>
+</clickhouse>
