@@ -142,6 +142,12 @@ services:
 
   minio:
     image: docker.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
+    # Docker Hub no longer serves minio/minio ("pull access denied"), and
+    # Coolify pulls every image before it swaps containers, so one failed pull
+    # aborts the whole deploy. Use the copy already on the host instead.
+    # Upstream Langfuse moved to cgr.dev/chainguard/minio; switch with the v4
+    # migration.
+    pull_policy: missing
     restart: always
     # create the 'langfuse' bucket before starting the service
     command: server /data --address ":9000" --console-address ":9001"
