@@ -169,13 +169,20 @@ services:
   redis:
     image: docker.io/redis:7
     restart: always
-    # CHANGEME: row below to secure redis password
-    command: >
-      --requirepass ${REDIS_AUTH:-myredissecret}
-      --maxmemory 192mb
-      --maxmemory-policy noeviction
-      --save 60 1000
-      --appendonly no
+    # The password reaches redis-server through a 0600 config file written at
+    # start-up, and redis-cli reads it from REDISCLI_AUTH, so it never appears
+    # in the process command line, `docker inspect` Cmd/Healthcheck, or the
+    # exec_start events Docker emits for every healthcheck run.
+    environment:
+      REDISCLI_AUTH: ${REDIS_AUTH:-myredissecret} # CHANGEME
+    entrypoint:
+      - sh
+      - -c
+      - |
+        umask 077
+        printf 'requirepass %s\n' "$$REDISCLI_AUTH" > /tmp/auth.conf
+        chown redis:redis /tmp/auth.conf
+        exec docker-entrypoint.sh redis-server /tmp/auth.conf --maxmemory 192mb --maxmemory-policy noeviction --save 60 1000 --appendonly no
     # ports:
       # - 127.0.0.1:6379:6379
     volumes:
@@ -187,7 +194,7 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_AUTH:-myredissecret}", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 3s
       timeout: 10s
       retries: 10

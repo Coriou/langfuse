@@ -148,6 +148,7 @@ Your `custom` branch differs from upstream in these ways:
 9. Postgres `shared_buffers=128MB` for small-RAM hosts
 10. langfuse-web healthcheck via `/api/public/health` for Coolify status
 11. All four images pinned to exact versions (see "Image pinning" below)
+12. Redis password kept off the command line: `redis-server` reads it from a 0600 config file written at start-up, and the healthcheck uses `REDISCLI_AUTH` instead of `redis-cli -a <password>` (which leaked into `docker events` / `docker inspect`)
 
 ### ClickHouse config overrides
 
